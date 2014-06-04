@@ -1,0 +1,27 @@
+<?php
+/**
+ * Kittencup Module
+ *
+ * @date 2014 14-6-3 上午11:51
+ * @copyright Copyright (c) 2014-2015 Kittencup. (http://www.kittencup.com)
+ * @license   http://kittencup.com
+ */
+?>
+    <style>
+        .tree-block {
+            width: 150px;
+            height: 50px;
+            background: red;
+            float: left;
+            margin: 0 5px;
+        }
+    </style>
+<?php foreach ($this->tree as $item): ?>
+
+    <div class="tree-block" style="margin-top:<?= $item['depth'] * 5 ?>em">
+        <p>(<?= $item['id'] ?>)<?= $item['name'] ?>(<?= $item['depth'] ?>)</p>
+        <i class="tree-left"><?= $item['l']; ?></i>
+        <i class="tree-right"><?= $item['r']; ?></i>
+    </div>
+
+<?php endforeach; ?>
