@@ -21,8 +21,8 @@ class TestController extends AbstractActionController
 
         $table = $this->getServiceLocator()->get('KpTree\Model\PathEnumTable');
 
-
-        var_dump($table->deleteChildById(2,false));
+        $table->deleteNodeById(2);
+        var_dump($table->getChildNodeById(1));
         exit;
         $vm = new ViewModel();
         $vm->setTerminal(true);
@@ -31,4 +31,5 @@ class TestController extends AbstractActionController
         ]);
         return $vm;
     }
+
 }

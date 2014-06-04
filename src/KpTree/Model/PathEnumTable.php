@@ -8,33 +8,58 @@
  */
 namespace KpTree\Model;
 
+use KpTree\Exception\RuntimeException;
+use Zend\Db\Adapter\Exception\InvalidQueryException;
 use Zend\Db\Sql\Delete;
 use Zend\Db\Sql\Expression;
 use Zend\Db\Sql\Predicate\Like;
 use Zend\Db\Sql\Predicate\Predicate;
 use Zend\Db\Sql\Select;
 use Zend\Db\Sql\Where;
-use KpTree\Exception\InvalidArgumentException;
 use Traversable;
 use Zend\Stdlib\ArrayUtils;
 
+/**
+ * 路径枚举
+ * Class PathEnumTable
+ * @package KpTree\Model
+ */
 class PathEnumTable extends AbstractTreeTable
 {
-
+    /**
+     * 表名
+     * @var string
+     */
     protected $table = 'pathEnum';
-    protected $pathColumn = 'path';
-    protected $pathDelimiter = '/';
-    protected $depthColumn = 'depth';
 
-    public function add($row, $toId)
+    /**
+     * 路径数据库字段
+     * @var string
+     */
+    protected $pathColumn = 'path';
+
+    /**
+     * 路径分隔符
+     * @var string
+     */
+    protected $pathDelimiter = '/';
+
+
+    /**
+     * @param Array|\ArrayObject|Object $row
+     * @param int $toId
+     * @return int
+     */
+    public function addNode($row, $toId)
     {
         $row = $this->resultSetExtract($row);
 
-        if (!is_array($row)) {
-            throw new InvalidArgumentException('$row 必须是数组或者是数据实体对象');
-        }
+        try {
+            $this->getConnection()->beginTransaction();
 
-        if ($this->insert($row) > 0) {
+            if ($this->insert($row) < 1) {
+                throw new RuntimeException('node 新增失败');
+            }
 
             $toRow = $this->getOneByColumn($toId, $this->idKey, [$this->pathColumn, $this->depthColumn]);
 
@@ -43,21 +68,37 @@ class PathEnumTable extends AbstractTreeTable
                 $this->depthColumn => $toRow[$this->depthColumn] + 1
             ];
 
-            return $this->update($updateData, [$this->idKey => $this->lastInsertValue]);
+            if ($this->update($updateData, [$this->idKey => $this->lastInsertValue]) < 1) {
+                throw new RuntimeException('node 更新失败');
+            }
+
+            $this->getConnection()->commit();
+        } catch (RuntimeException $e) {
+            $this->getConnection()->rollback();
+        } catch (InvalidQueryException $e) {
+            $this->getConnection()->rollback();
         }
+
+        return $this->lastInsertValue;
 
     }
 
-    public function move($fromId, $toId)
+    /**
+     * @param int $fromId
+     * @param int $toId
+     * @return int
+     */
+    public function moveNode($fromId, $toId)
     {
-        $fromRow = $this->getOneByColumn($fromId, $this->idKey);
-        $toRow = $this->getOneByColumn($toId, $this->idKey);
+        $fromRow = $this->getOneByColumn($fromId, $this->idKey, [$this->pathColumn, $this->depthColumn]);
+        $toRow = $this->getOneByColumn($toId, $this->idKey, [$this->pathColumn, $this->depthColumn]);
+
         if (strpos($toRow[$this->pathColumn], $fromRow[$this->pathColumn]) !== false) {
-            return;
+            return -1;
         }
         $replacePath = substr($fromRow[$this->pathColumn], 0, strrpos($fromRow[$this->pathColumn], $this->pathDelimiter, -2) + 1);
         $updateDepth = $toRow[$this->depthColumn] - $fromRow[$this->depthColumn] + 1;
-        $this->update([
+        return $this->update([
             $this->pathColumn => new Expression(
                     'replace(' . $this->quoteIdentifier($this->pathColumn) . ',\'' . $replacePath . '\',\'' . $toRow[$this->pathColumn] . '\')'
                 ),
@@ -67,11 +108,19 @@ class PathEnumTable extends AbstractTreeTable
         });
     }
 
-    public function getParentById($id, $depth = null, $order = 'ASC')
+    /**
+     * @param int $id
+     * @param null $depth
+     * @param string $order
+     * @param array $columns
+     * @return \Zend\Db\ResultSet\ResultSet
+     */
+    public function getParentNodeById($id, $depth = null, $order = 'ASC', $columns = ['*'])
     {
-        $row = $this->getOneByColumn($id, $this->idKey);
+        $row = $this->getOneByColumn($id, $this->idKey, [$this->pathColumn, $this->depthColumn]);
 
-        return $this->select(function (Select $select) use ($row, $depth, $order) {
+        return $this->select(function (Select $select) use ($row, $depth, $order, $columns) {
+
 
             $select->where(function (Where $where) use ($row) {
 
@@ -84,41 +133,64 @@ class PathEnumTable extends AbstractTreeTable
                 }
                 $where->in($this->pathColumn, $paths);
 
-
             });
 
             $select->order([$this->pathColumn => $order]);
 
             if ($depth !== null) {
+
+                if (!in_array($this->depthColumn, $columns)) {
+                    $columns[] = $this->depthColumn;
+                }
+
                 $predicate = new Predicate();
                 $predicate->greaterThanOrEqualTo($this->depthColumn, $row[$this->depthColumn] - $depth);
                 $select->having($predicate);
             }
 
-        })->toArray();
+            $select->columns($columns);
+
+        });
     }
 
-    public function getChildById($id, $depth = null, $order = 'ASC')
+    /**
+     * @param int $id
+     * @param null $depth
+     * @param string $order
+     * @param array $columns
+     * @return \Zend\Db\ResultSet\ResultSet
+     */
+    public function getChildNodeById($id, $depth = null, $order = 'ASC', $columns = ['*'])
     {
+        $row = $this->getOneByColumn($id, $this->idKey, [$this->pathColumn, $this->depthColumn]);
 
-        $row = $this->getOneByColumn($id, $this->idKey);
-
-        return $this->select(function (Select $select) use ($row, $depth, $order) {
+        return $this->select(function (Select $select) use ($row, $depth, $order, $columns) {
 
             $select->where([new Like($this->table . '.' . $this->pathColumn, $row[$this->pathColumn] . '%')]);
 
             if ($depth !== null) {
+
+                if (!in_array($this->depthColumn, $columns)) {
+                    $columns[] = $this->depthColumn;
+                }
+
                 $predicate = new Predicate();
                 $predicate->lessThanOrEqualTo($this->depthColumn, $depth + $row[$this->depthColumn]);
                 $select->having($predicate);
             }
 
+            $select->columns($columns);
             $select->order([$this->pathColumn => $order]);
 
-        })->toArray();
+        });
     }
 
-    public function deleteChildById($idOrIds, $itself = true)
+    /**
+     * @param array|int|Traversable $idOrIds
+     * @param bool $itself
+     * @return int
+     */
+    public function deleteChildNodeById($idOrIds, $itself = true)
     {
         if ($idOrIds instanceof Traversable) {
             $idOrIds = ArrayUtils::iteratorToArray($idOrIds);
@@ -126,27 +198,29 @@ class PathEnumTable extends AbstractTreeTable
 
         if (is_array($idOrIds)) {
             foreach ($idOrIds as $id) {
-                $this->deleteChildById($id, $itself);
+                $this->{__FUNCTION__}($id, $itself);
             }
             return;
         }
 
+        $row = $this->getOneByColumn($idOrIds, $this->idKey, [$this->pathColumn]);
 
-        $row = $this->getOneByColumn($idOrIds, $this->idKey);
-
-        return $this->delete(function (Delete $delete) use ($row, $itself) {
-
-            $delete->where(function (Where $where) use ($row, $itself) {
+        return $this->delete(function (Delete $delete) use ($idOrIds, $row, $itself) {
+            $delete->where(function (Where $where) use ($idOrIds, $row, $itself) {
                 $where->like($this->pathColumn, $row[$this->pathColumn] . '%');
 
                 if (!$itself) {
-                    $where->notEqualTo($this->idKey, $row[$this->idKey]);
+                    $where->notEqualTo($this->idKey, $idOrIds);
                 }
             });
         });
     }
 
-    public function deleteById($idOrIds)
+    /**
+     * @param array|int|Traversable $idOrIds
+     * @return int
+     */
+    public function deleteNodeById($idOrIds)
     {
         if ($idOrIds instanceof Traversable) {
             $idOrIds = ArrayUtils::iteratorToArray($idOrIds);
@@ -154,12 +228,39 @@ class PathEnumTable extends AbstractTreeTable
 
         if (is_array($idOrIds)) {
             foreach ($idOrIds as $id) {
-                $this->deleteChildById($id);
+                $this->{__FUNCTION__}($id);
             }
             return;
         }
 
-        $row = $this->getOneByColumn($idOrIds, $this->idKey);
+        $row = $this->getOneByColumn($idOrIds, $this->idKey, [$this->pathColumn, $this->depthColumn]);
+
+        try {
+            $this->getConnection()->beginTransaction();
+
+            if ($this->delete([$this->idKey => $idOrIds]) < 1) {
+                throw new RuntimeException('node 删除失败');
+            }
+
+            $replacePath = substr($row[$this->pathColumn], 0, strrpos($row[$this->pathColumn], $this->pathDelimiter, -2) + 1);
+
+            $affectedRows = $this->update([
+                $this->pathColumn => new Expression(
+                        'replace(' . $this->quoteIdentifier($this->pathColumn) . ',\'' . $row[$this->pathColumn] . '\',\'' . $replacePath . '\')'
+                    ),
+                $this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '- 1')
+            ], function (Where $where) use ($row) {
+                $where->like($this->pathColumn, $row[$this->pathColumn] . '%');
+            });
+
+            $this->getConnection()->commit();
+        } catch (RuntimeException $e) {
+            $this->getConnection()->rollback();
+        } catch (InvalidQueryException $e) {
+            $this->getConnection()->rollback();
+        }
+
+        return $affectedRows;
 
     }
 

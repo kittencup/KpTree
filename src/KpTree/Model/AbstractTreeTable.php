@@ -17,6 +17,7 @@ use Zend\Db\TableGateway\Feature\EventFeature;
 use Zend\Db\TableGateway\Feature\FeatureSet;
 use Zend\EventManager\EventInterface;
 use Zend\EventManager\EventManager;
+use KpTree\Exception\InvalidArgumentException;
 use ArrayObject;
 
 abstract class AbstractTreeTable extends AbstractTableGateway implements AdapterAwareInterface,
@@ -26,8 +27,14 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
 
     protected $idKey = 'id';
 
-    public function getOneByColumn($val, $column = 'id', $selectColumns = ['*'])
+    protected $depthColumn = 'depth';
+
+    public function getOneByColumn($val, $column = null, $selectColumns = ['*'])
     {
+        if ($column === null) {
+            $column = $this->idKey;
+        }
+
         $row = $this->select(function (Select $select) use ($val, $column, $selectColumns) {
             $select->columns($selectColumns)->where([$column => $val]);
         })->current();
@@ -51,6 +58,11 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
         parent::initialize();
     }
 
+    protected function getConnection()
+    {
+        return $this->getAdapter()->getDriver()->getConnection();
+    }
+
     protected function addDebugFeature()
     {
 
@@ -59,7 +71,7 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
         }
 
         $eventManager = new EventManager();
-        $eventManager->attach(['preSelect', 'preUpdate', 'preInsert', 'preUpdate'], function (EventInterface $event) {
+        $eventManager->attach(['preSelect', 'preUpdate', 'preInsert', 'preDelete'], function (EventInterface $event) {
             $sqlKey = strtolower(str_replace('pre', '', $event->getName()));
             echo $event->getParam($sqlKey)->getSqlString($event->getTarget()->getAdapter()->getPlatform()), '<br>';
         });
@@ -74,10 +86,21 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
 
     protected function resultSetExtract($row)
     {
-        if ($row instanceof ArrayObject || $row === null || is_array($row))
-            return $row;
+        if (!$row) {
+            throw new InvalidArgumentException('$row 不能为空');
+        }
 
-        return $this->resultSetPrototype->getHydrator()->extract($row);
+        if ($row instanceof ArrayObject) {
+            $row = $row->getArrayCopy();
+        } elseif (is_object($row)) {
+            $row = $this->resultSetPrototype->getHydrator()->extract($row);
+        }
+
+        if (!is_array($row)) {
+            throw new InvalidArgumentException('$row 必须是数组或者是数据实体对象');
+        }
+
+        return $row;
     }
 
 }
