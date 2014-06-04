@@ -9,7 +9,8 @@
 
 namespace KpTree\Model;
 
-use KpTree\Exception\InvalidArgumentException;
+use KpTree\Exception\RuntimeException;
+use Zend\Db\Adapter\Exception\InvalidQueryException;
 use Zend\Db\Sql\Delete;
 use Zend\Db\Sql\Predicate\Between;
 use Zend\Db\Sql\Predicate\Expression;
@@ -19,127 +20,185 @@ use Zend\Db\Sql\Where;
 use Traversable;
 use Zend\Stdlib\ArrayUtils;
 
+/**
+ * 嵌套集
+ * Class NestedTable
+ * @package KpTree\Model
+ */
 class NestedTable extends AbstractTreeTable
 {
+    /**
+     * 表名
+     * @var string
+     */
     protected $table = 'nested';
+
+    /**
+     * 左数据库字段
+     * @var string
+     */
     protected $lColumn = 'l';
+
+    /**
+     * 右数据库字段
+     * @var string
+     */
     protected $rColumn = 'r';
-    protected $depthColumn = 'depth';
 
-
-    public function add($row, $toId)
+    /**
+     * @param Array|\ArrayObject|Object $row
+     * @param int $toId
+     * @return int
+     */
+    public function addNode($row, $toId)
     {
-
         $row = $this->resultSetExtract($row);
 
-        if (!is_array($row)) {
-            throw new InvalidArgumentException('$row 必须是数组或者是数据实体对象');
-        }
-
-        $toRow = $this->getOneByColumn($toId, $this->idKey);
+        $toRow = $this->getOneByColumn($toId, $this->idKey, [$this->rColumn, $this->lColumn, $this->depthColumn]);
 
         $row[$this->lColumn] = $toRow[$this->rColumn];
         $row[$this->rColumn] = $toRow[$this->rColumn] + 1;
         $row[$this->depthColumn] = $toRow[$this->depthColumn] + 1;
 
-        $this->update([
-            $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '+2')
-        ], function (Where $where) use ($toRow) {
-            $where->greaterThanOrEqualTo($this->rColumn, $toRow[$this->rColumn]);
-        });
+        try {
+            $this->getConnection()->beginTransaction();
 
-        $this->update([
-            $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '+2')
-        ], function (Where $where) use ($toRow) {
-            $where->greaterThan($this->lColumn, $toRow[$this->rColumn]);
-        });
+            $this->update([
+                $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '+2')
+            ], function (Where $where) use ($toRow) {
+                $where->greaterThanOrEqualTo($this->rColumn, $toRow[$this->rColumn]);
+            });
 
-        return $this->insert($row);
+            $this->update([
+                $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '+2')
+            ], function (Where $where) use ($toRow) {
+                $where->greaterThan($this->lColumn, $toRow[$this->rColumn]);
+            });
 
+            if ($this->insert($row) < 1) {
+                throw new RuntimeException('node 新增失败');
+            }
+
+            $this->getConnection()->commit();
+        } catch (RuntimeException $e) {
+            $this->getConnection()->rollback();
+        } catch (InvalidQueryException $e) {
+            $this->getConnection()->rollback();
+        }
+
+        return $this->lastInsertValue;
     }
 
-
-    public function move($fromId, $toId)
+    /**
+     * @param int $fromId
+     * @param int $toId
+     * @return int
+     */
+    public function moveNode($fromId, $toId)
     {
 
-        $fromRow = $this->getOneByColumn($fromId, $this->idKey);
+        $fromRow = $this->getOneByColumn($fromId, $this->idKey, [$this->rColumn, $this->lColumn, $this->depthColumn]);
+        $toRow = $this->getOneByColumn($toId, $this->idKey, [$this->rColumn, $this->lColumn, $this->depthColumn]);
 
-        $toRow = $this->getOneByColumn($toId, $this->idKey);
+        if ($fromRow[$this->lColumn] < $toRow[$this->rColumn] && $fromRow[$this->rColumn] > $toRow[$this->rColumn]) {
+            return -1;
+        }
 
         $differenceValue = $fromRow[$this->rColumn] - $fromRow[$this->lColumn];
         $depthValue = $toRow[$this->depthColumn] - $fromRow[$this->depthColumn] + 1;
 
-        $child = $this->getChildById($fromId);
+        $child = $this->getChildNodeById($fromId, null, 'ASC', [$this->idKey]);
 
         $updateIds = [];
         foreach ($child as $row) {
+
             $row = $this->resultSetExtract($row);
 
             $updateIds[] = $row[$this->idKey];
         }
 
-        if ($toRow[$this->rColumn] > $fromRow[$this->rColumn]) {
+        try {
 
-            $this->update([
-                $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '-' . $differenceValue . '- 1')
-            ], function (Where $where) use ($fromRow, $toRow) {
-                $where->greaterThan($this->lColumn, $fromRow[$this->rColumn]);
-            });
+            $this->getConnection()->beginTransaction();
 
-            $this->update([
-                $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '-' . $differenceValue . '- 1')
-            ], function (Where $where) use ($fromRow, $toRow) {
-                $where->greaterThan($this->rColumn, $fromRow[$this->rColumn]);
-                $where->lessThan($this->rColumn, $toRow[$this->rColumn]);
-            });
+            if ($toRow[$this->rColumn] > $fromRow[$this->rColumn]) {
 
-            $modifyValue = $toRow[$this->rColumn] - $fromRow[$this->rColumn] - 1;
+                $this->update([
+                    $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '-' . $differenceValue . '- 1')
+                ], function (Where $where) use ($fromRow, $toRow) {
+                    $where->greaterThan($this->lColumn, $fromRow[$this->rColumn]);
+                });
 
-            $this->update([
-                $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '+' . $modifyValue),
-                $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '+' . $modifyValue),
-                $this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '+' . $depthValue)
-            ], function (Where $where) use ($updateIds) {
-                $where->in($this->idKey, $updateIds);
-            });
+                $this->update([
+                    $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '-' . $differenceValue . '- 1')
+                ], function (Where $where) use ($fromRow, $toRow) {
+                    $where->greaterThan($this->rColumn, $fromRow[$this->rColumn]);
+                    $where->lessThan($this->rColumn, $toRow[$this->rColumn]);
+                });
 
-        } else {
+                $modifyValue = $toRow[$this->rColumn] - $fromRow[$this->rColumn] - 1;
 
-            $this->update([
-                $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '+' . $differenceValue . '+ 1')
-            ], function (Where $where) use ($fromRow, $toRow) {
-                $where->greaterThan($this->lColumn, $toRow[$this->rColumn]);
-                $where->lessThan($this->lColumn, $fromRow[$this->lColumn]);
-            });
+                $affectedRows = $this->update([
+                    $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '+' . $modifyValue),
+                    $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '+' . $modifyValue),
+                    $this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '+' . $depthValue)
+                ], function (Where $where) use ($updateIds) {
+                    $where->in($this->idKey, $updateIds);
+                });
 
+            } else {
 
-            $this->update([
-                $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '+' . $differenceValue . '+ 1')
-            ], function (Where $where) use ($fromRow, $toRow) {
-                $where->greaterThanOrEqualTo($this->rColumn, $toRow[$this->rColumn]);
-                $where->lessThan($this->rColumn, $fromRow[$this->lColumn]);
-            });
+                $this->update([
+                    $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '+' . $differenceValue . '+ 1')
+                ], function (Where $where) use ($fromRow, $toRow) {
+                    $where->greaterThan($this->lColumn, $toRow[$this->rColumn]);
+                    $where->lessThan($this->lColumn, $fromRow[$this->lColumn]);
+                });
 
 
-            $modifyValue = $fromRow[$this->lColumn] - $toRow[$this->rColumn];
+                $this->update([
+                    $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '+' . $differenceValue . '+ 1')
+                ], function (Where $where) use ($fromRow, $toRow) {
+                    $where->greaterThanOrEqualTo($this->rColumn, $toRow[$this->rColumn]);
+                    $where->lessThan($this->rColumn, $fromRow[$this->lColumn]);
+                });
 
-            $this->update([
-                $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '-' . $modifyValue),
-                $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '-' . $modifyValue),
-                $this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '+' . $depthValue)
-            ], function (Where $where) use ($updateIds) {
-                $where->in($this->idKey, $updateIds);
-            });
 
+                $modifyValue = $fromRow[$this->lColumn] - $toRow[$this->rColumn];
+
+                $affectedRows = $this->update([
+                    $this->rColumn => new Expression($this->quoteIdentifier($this->rColumn) . '-' . $modifyValue),
+                    $this->lColumn => new Expression($this->quoteIdentifier($this->lColumn) . '-' . $modifyValue),
+                    $this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '+' . $depthValue)
+                ], function (Where $where) use ($updateIds) {
+                    $where->in($this->idKey, $updateIds);
+                });
+
+            }
+            $this->getConnection()->commit();
+        } catch (InvalidQueryException $e) {
+            $this->getConnection()->rollback();
         }
 
+        return $affectedRows;
 
     }
 
-    public function getParentById($id, $depth = null,$order = 'ASC')
-    {
 
-        return $this->select(function (Select $select) use ($id, $depth,$order) {
+    /**
+     * @param int $id
+     * @param null $depth
+     * @param string $order
+     * @param array $columns
+     * @return \Zend\Db\ResultSet\ResultSet
+     */
+    public function getParentNodeById($id, $depth = null, $order = 'ASC', $columns = ['*'])
+    {
+        return $this->select(function (Select $select) use ($id, $depth, $order, $columns) {
+
+            if (!in_array($this->depthColumn, $columns)) {
+                $columns[] = $this->depthColumn;
+            }
 
             $select->columns([$this->depthColumn])
                 ->join(
@@ -148,12 +207,14 @@ class NestedTable extends AbstractTreeTable
                         $this->table . '.' . $this->lColumn,
                         new Expression($this->quoteIdentifier('t2.' . $this->lColumn)),
                         new Expression($this->quoteIdentifier('t2.' . $this->rColumn))
-                    )
+                    ),
+                    $columns
                 )->where(function (Where $where) use ($id) {
                     $where->equalTo($this->table . '.' . $this->idKey, $id);
                 });
 
             if ($depth !== null) {
+
                 $predicate = new Predicate();
                 $predicate->greaterThanOrEqualTo(
                     't2.' . $this->depthColumn,
@@ -167,9 +228,21 @@ class NestedTable extends AbstractTreeTable
 
     }
 
-    public function getChildById($id, $depth = null, $order = 'ASC')
+    /**
+     * @param int $id
+     * @param null $depth
+     * @param string $order
+     * @param array $columns
+     * @return \Zend\Db\ResultSet\ResultSet
+     */
+    public function getChildNodeById($id, $depth = null, $order = 'ASC', $columns = ['*'])
     {
-        return $this->select(function (Select $select) use ($id, $depth, $order) {
+
+        return $this->select(function (Select $select) use ($id, $depth, $order, $columns) {
+
+            if (!in_array($this->depthColumn, $columns)) {
+                $columns[] = $this->depthColumn;
+            }
 
             $select->columns([$this->depthColumn])
                 ->join(
@@ -178,7 +251,8 @@ class NestedTable extends AbstractTreeTable
                         't2.' . $this->lColumn,
                         new Expression($this->quoteIdentifier($this->table . '.' . $this->lColumn)),
                         new Expression($this->quoteIdentifier($this->table . '.' . $this->rColumn))
-                    )
+                    ),
+                    $columns
                 )->where(function (Where $where) use ($id) {
                     $where->equalTo($this->table . '.' . $this->idKey, $id);
                 });
@@ -200,7 +274,12 @@ class NestedTable extends AbstractTreeTable
 
     }
 
-    public function deleteChildById($idOrIds, $itself = true)
+    /**
+     * @param array|int|Traversable $idOrIds
+     * @param bool $itself
+     * @return int | null
+     */
+    public function deleteChildNodeById($idOrIds, $itself = true)
     {
 
         if ($idOrIds instanceof Traversable) {
@@ -209,7 +288,7 @@ class NestedTable extends AbstractTreeTable
 
         if (is_array($idOrIds)) {
             foreach ($idOrIds as $id) {
-                $this->deleteChildById($id, $itself);
+                $this->{__FUNCTION__}($id, $itself);
             }
             return;
         }
@@ -233,8 +312,11 @@ class NestedTable extends AbstractTreeTable
         return $affectedRows;
     }
 
-
-    public function deleteById($idOrIds)
+    /**
+     * @param array|int|Traversable $idOrIds
+     * @return  int | null
+     */
+    public function deleteNodeById($idOrIds)
     {
         if ($idOrIds instanceof Traversable) {
             $idOrIds = ArrayUtils::iteratorToArray($idOrIds);
@@ -242,22 +324,32 @@ class NestedTable extends AbstractTreeTable
 
         if (is_array($idOrIds)) {
             foreach ($idOrIds as $id) {
-                $this->deleteById($id);
+                $this->{__FUNCTION__}($id);
             }
             return;
         }
 
         $row = $this->getOneByColumn($idOrIds, $this->idKey, [$this->rColumn, $this->lColumn]);
 
-        $affectedRows = $this->delete([$this->idKey => $idOrIds]);
+        try {
+            $this->getConnection()->beginTransaction();
 
-        if ($affectedRows > 0) {
-            $this->update([
+            if ($this->delete([$this->idKey => $idOrIds]) < 1) {
+                throw new RuntimeException('node 删除失败');
+            }
+
+            $affectedRows = $this->update([
                 $this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '-' . 1)
             ], function (Where $where) use ($row) {
                 $where->greaterThan($this->lColumn, $row[$this->lColumn]);
                 $where->lessThan($this->rColumn, $row[$this->rColumn]);
             });
+
+            $this->getConnection()->commit();
+        } catch (RuntimeException $e) {
+            $this->getConnection()->rollback();
+        } catch (InvalidQueryException $e) {
+            $this->getConnection()->rollback();
         }
 
         return $affectedRows;

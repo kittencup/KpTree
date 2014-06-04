@@ -87,7 +87,7 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
     protected function resultSetExtract($row)
     {
         if (!$row) {
-            throw new InvalidArgumentException('$row 不能为空');
+            throw new InvalidArgumentException('$row节点不存在');
         }
 
         if ($row instanceof ArrayObject) {

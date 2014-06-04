@@ -19,15 +19,14 @@ class TestController extends AbstractActionController
     public function indexAction()
     {
 
-        $table = $this->getServiceLocator()->get('KpTree\Model\PathEnumTable');
+        $table = $this->getServiceLocator()->get('KpTree\Model\NestedTable');
 
-        $table->deleteNodeById(2);
-        var_dump($table->getChildNodeById(1));
-        exit;
+        //var_dump($table->getParentNodeById(6)->toArray());
+        //$table->deleteChildNodeById(2);
         $vm = new ViewModel();
         $vm->setTerminal(true);
         $vm->setVariables([
-            'tree' => $table->getChildById(1)
+            'tree' => $table->getChildNodeById(1)
         ]);
         return $vm;
     }
