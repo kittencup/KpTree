@@ -27,12 +27,10 @@ class NestedTable extends AbstractTreeTable
     protected $depthColumn = 'depth';
 
 
-
     public function add($row, $toId)
     {
 
         $row = $this->resultSetExtract($row);
-
 
         if (!is_array($row)) {
             throw new InvalidArgumentException('$row 必须是数组或者是数据实体对象');

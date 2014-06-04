@@ -74,7 +74,7 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
 
     protected function resultSetExtract($row)
     {
-        if ($row instanceof ArrayObject || $row === null)
+        if ($row instanceof ArrayObject || $row === null || is_array($row))
             return $row;
 
         return $this->resultSetPrototype->getHydrator()->extract($row);

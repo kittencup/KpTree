@@ -9,6 +9,7 @@
 
 namespace KpTree\Controller;
 
+use Zend\Filter\Null;
 use Zend\Mvc\Controller\AbstractActionController;
 use Zend\View\Model\ViewModel;
 
@@ -20,9 +21,8 @@ class TestController extends AbstractActionController
 
         $table = $this->getServiceLocator()->get('KpTree\Model\PathEnumTable');
 
-        var_dump($table->getParentById(6));
 
-
+        var_dump($table->deleteChildById(2,false));
         exit;
         $vm = new ViewModel();
         $vm->setTerminal(true);
