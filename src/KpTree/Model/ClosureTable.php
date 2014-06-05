@@ -9,27 +9,54 @@
 
 namespace KpTree\Model;
 
+use KpTree\Exception\InvalidArgumentException;
 use KpTree\Exception\RuntimeException;
 use Zend\Db\Adapter\Exception\InvalidQueryException;
 use Zend\Db\ResultSet\ResultSet;
+use Zend\Db\Sql\SqlInterface;
 use Zend\Db\Sql\Delete;
 use Zend\Db\Sql\Expression;
 use Zend\Db\Sql\Insert;
 use Zend\Db\Sql\Select;
 use Zend\Db\Sql\Where;
 
+/**
+ * Class ClosureTable
+ * @package KpTree\Model
+ */
 class ClosureTable extends AbstractTreeTable
 {
 
+    /**
+     * 表名
+     * @var string
+     */
     protected $table = 'closure';
 
+    /**
+     * 存储引用关系的表名
+     * @var string
+     */
     protected $pathsTable = 'closurePaths';
 
+    /**
+     * 祖先字段名
+     * @var string
+     */
     protected $ancestorColumn = 'ancestor';
 
+    /**
+     * 后辈字段名
+     * @var string
+     */
     protected $descendantColumn = 'descendant';
 
 
+    /**
+     * @param Array|\ArrayObject|Object $node
+     * @param int $toId
+     * @return bool|int
+     */
     public function addNode($node, $toId)
     {
         $toNode = $this->getOneByColumn($toId, $this->idKey, [$this->depthColumn]);
@@ -55,10 +82,7 @@ class ClosureTable extends AbstractTreeTable
             $select->combine($unionSelect);
 
             $insert->values($select);
-            $this->featureSet->apply('preInsert', array($insert));
-            $statement = $this->sql->prepareStatementForSqlObject($insert);
-            $result = $statement->execute();
-            $this->featureSet->apply('postInsert', array($statement, $result));
+            $result = $this->executeSql($insert);
             if ($result->getAffectedRows() < 1) {
                 throw new RuntimeException(sprintf($this->pathsTable) . '节点数据 添加失败');
             }
@@ -74,13 +98,148 @@ class ClosureTable extends AbstractTreeTable
         return $nodeLastInserValue;
     }
 
+    /**
+     * @param $executeSql
+     * @return \Zend\Db\Adapter\Driver\ResultInterface
+     * @throws \KpTree\Exception\InvalidArgumentException
+     */
+    protected function executeSql($executeSql)
+    {
+        if (!$executeSql instanceof SqlInterface) {
+            throw new InvalidArgumentException('$executeSql 必须是 \Zend\Db\Sql\Ddl\SqlInterface 实例');
+        }
 
+        $class = get_class($executeSql);
+
+        $executeAction = substr($class, strrpos($class, '\\') + 1);
+
+        $this->featureSet->apply('pre' . $executeAction, array($executeSql));
+        $statement = $this->sql->prepareStatementForSqlObject($executeSql);
+        $result = $statement->execute();
+        $this->featureSet->apply('post' . $executeAction, array($statement, $result, new ResultSet()));
+        return $result;
+    }
+
+    /**
+     * @param $result
+     * @param $key
+     * @return array
+     */
+    protected function getInList($result, $key)
+    {
+        $inList = [];
+        foreach ($result as $node) {
+            $inList[] = $node[$key];
+        }
+        return $inList;
+    }
+
+    /**
+     * @param int $fromId
+     * @param int $toId
+     * @return int
+     */
     public function moveNode($fromId, $toId)
     {
-        // TODO: Implement moveNode() method.
+        $fromNode = $this->getOneByColumn($fromId, $this->idKey, [$this->depthColumn]);
+        $toNode = $this->getOneByColumn($toId, $this->idKey, [$this->depthColumn]);
+
+        /**
+         * @todo Mysql 不支持在一个表里先查询在删除的操作，在这里先查询出内容来
+         */
+        $descendantSelect = new Select($this->pathsTable);
+        $descendantSelect->columns([$this->descendantColumn])->where([$this->ancestorColumn => $fromId]);
+        $result = $this->executeSql($descendantSelect);
+        $descendantInList = $this->getInList($result, $this->descendantColumn);
+
+        // 不允许父移到子
+        if (in_array($toId, $descendantInList)) {
+            return -1;
+        }
+
+        $ancestorSelect = new Select($this->pathsTable);
+        $ancestorSelect->columns([$this->ancestorColumn])->where(function (Where $where) use ($fromId) {
+            $where->equalTo($this->descendantColumn, $fromId);
+            $where->notEqualTo($this->ancestorColumn, new Expression($this->descendantColumn));
+        });
+        $result = $this->executeSql($ancestorSelect);
+        $ancestorInList = $this->getInList($result, $this->ancestorColumn);
+
+
+        try {
+            $this->getConnection()->beginTransaction();
+
+            // 删除当前节点及子节点与当前节点父节点之间的引用(保留当前节点和自身的引用及节点与子元素节点的引用)
+            $delete = new Delete($this->pathsTable);
+            $delete->where(function (Where $where) use ($descendantInList, $ancestorInList) {
+                $where->in($this->descendantColumn, $descendantInList);
+                $where->in($this->ancestorColumn, $ancestorInList);
+            });
+            $result = $this->executeSql($delete);
+
+            // 节点肯定有父节点，所以这里的影响条数一定大于0
+            if ($result->getAffectedRows() < 1) {
+                throw new RuntimeException($this->pathsTable . '节点数据 删除失败');
+            }
+
+            /**
+             * @todo Zend Framework 2 不支持 CROSS JOIN
+             */
+            $sql = sprintf(
+                'INSERT INTO %s (%s,%s) SELECT %s , %s FROM %s CROSS JOIN %s WHERE %s = %d AND %s = %d',
+                $this->quoteIdentifier($this->pathsTable),
+                $this->quoteIdentifier($this->ancestorColumn),
+                $this->quoteIdentifier($this->descendantColumn),
+                $this->quoteIdentifier('p.' . $this->ancestorColumn),
+                $this->quoteIdentifier('s.' . $this->descendantColumn),
+                $this->quoteIdentifier($this->pathsTable) . ' AS ' . $this->quoteIdentifier('p'),
+                $this->quoteIdentifier($this->pathsTable) . ' AS ' . $this->quoteIdentifier('s'),
+                $this->quoteIdentifier('p.' . $this->descendantColumn),
+                $toId,
+                $this->quoteIdentifier('s.' . $this->ancestorColumn),
+                $fromId
+            );
+
+            // 调试打印
+            if (static::$openDebug) {
+                echo $sql, '<br>';
+            }
+
+            /* @var \Zend\Db\Adapter\Driver\Pdo\Result $result */
+            $result = $this->getAdapter()->query($sql)->execute();
+
+            $affectedRows = $result->getAffectedRows();
+            if ($affectedRows < 1) {
+                throw new RuntimeException($this->pathsTable . '节点数据 删除失败');
+            }
+
+            // 更新depth
+            $this->update([
+                $this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '+' . ($toNode[$this->depthColumn] - $fromNode[$this->depthColumn] + 1))
+            ], function (Where $where) use ($descendantInList) {
+                $where->in($this->idKey, $descendantInList);
+            });
+
+            $this->getConnection()->commit();
+        } catch (RuntimeException $e) {
+            $affectedRows = 0;
+            $this->getConnection()->rollback();
+        } catch (InvalidQueryException $e) {
+            $affectedRows = 0;
+            $this->getConnection()->rollback();
+        }
+
+        return $affectedRows;
     }
 
 
+    /**
+     * @param int $id
+     * @param null $depth
+     * @param string $order
+     * @param array $columns
+     * @return ResultSet
+     */
     public function getParentNodeById($id, $depth = null, $order = 'ASC', $columns = ['*'])
     {
         $node = $this->getOneByColumn($id, $this->idKey, [$this->depthColumn]);
@@ -103,10 +262,17 @@ class ClosureTable extends AbstractTreeTable
             }
 
             $select->order([$this->depthColumn => $order]);
-        })->toArray();
+        });
     }
 
 
+    /**
+     * @param int $id
+     * @param null $depth
+     * @param string $order
+     * @param array $columns
+     * @return ResultSet
+     */
     public function getChildNodeById($id, $depth = null, $order = 'ASC', $columns = ['*'])
     {
 
@@ -122,7 +288,12 @@ class ClosureTable extends AbstractTreeTable
             $select->join(
                 ['t3' => $this->pathsTable],
                 't3.' . $this->descendantColumn . '=' . 't2.' . $this->descendantColumn,
-                ['breadcrumbs' => new Expression("GROUP_CONCAT(t3." . $this->ancestorColumn . " SEPARATOR ',' )")]
+                ['breadcrumbs' => new Expression("GROUP_CONCAT(t3." . $this->ancestorColumn . " ORDER BY " . 't4.' . $this->depthColumn . " SEPARATOR ',' )")]
+            );
+            $select->join(
+                ['t4' => $this->table],
+                't4.' . $this->idKey . '=' . 't3.' . $this->ancestorColumn,
+                []
             );
             $select->where(['t2.' . $this->ancestorColumn => $id]);
 
@@ -135,11 +306,16 @@ class ClosureTable extends AbstractTreeTable
 
             $select->group($this->table . '.' . $this->idKey);
             $select->order(['breadcrumbs' => $order]);
-        })->toArray();
+        });
 
 
     }
 
+    /**
+     * @param array|int|Traversable $idOrIds
+     * @param bool $itself
+     * @return int
+     */
     public function deleteChildNodeById($idOrIds, $itself = true)
     {
         /**
@@ -154,22 +330,16 @@ class ClosureTable extends AbstractTreeTable
             });
         }
 
-        $this->featureSet->apply('preSelect', array($select));
-        $statement = $this->sql->prepareStatementForSqlObject($select);
-        $result = $statement->execute();
-        $this->featureSet->apply('postSelect', array($statement, $result, new ResultSet()));
+        $result = $this->executeSql($select);
 
-        $ids = [];
-        foreach ($result as $node) {
-            $ids[] = $node[$this->descendantColumn];
-        }
+        $inList = $this->getInList($result, $this->descendantColumn);
 
         try {
             $this->getConnection()->beginTransaction();
 
-            $affectedRows = $this->delete(function (Delete $delete) use ($ids) {
-                $delete->where(function (Where $where) use ($ids) {
-                    $where->in($this->idKey, $ids);
+            $affectedRows = $this->delete(function (Delete $delete) use ($inList) {
+                $delete->where(function (Where $where) use ($inList) {
+                    $where->in($this->idKey, $inList);
                 });
             });
 
@@ -178,16 +348,14 @@ class ClosureTable extends AbstractTreeTable
             }
 
             $delete = new Delete($this->pathsTable);
-            $delete->where(function (Where $where) use ($ids) {
-                $where->in($this->descendantColumn, $ids);
+            $delete->where(function (Where $where) use ($inList) {
+                $where->in($this->descendantColumn, $inList);
             });
 
-            $this->featureSet->apply('preDelete', array($delete));
-            $statement = $this->sql->prepareStatementForSqlObject($delete);
-            $result = $statement->execute();
-            $this->featureSet->apply('postDelete', array($statement, $result));
+            $result = $this->executeSql($delete);
+
             if ($result->getAffectedRows() < 1) {
-                throw new RuntimeException(sprintf($this->pathsTable) . '节点数据 删除失败');
+                throw new RuntimeException($this->pathsTable . '节点数据 删除失败');
             }
             $this->getConnection()->commit();
         } catch (RuntimeException $e) {
@@ -202,6 +370,10 @@ class ClosureTable extends AbstractTreeTable
 
     }
 
+    /**
+     * @param array|int|\Traversable $idOrIds
+     * @return int
+     */
     public function deleteNodeById($idOrIds)
     {
         $select = new Select($this->pathsTable);
@@ -210,15 +382,9 @@ class ClosureTable extends AbstractTreeTable
             $where->notEqualTo($this->descendantColumn, $idOrIds);
         });
 
-        $this->featureSet->apply('preSelect', array($select));
-        $statement = $this->sql->prepareStatementForSqlObject($select);
-        $result = $statement->execute();
-        $this->featureSet->apply('postSelect', array($statement, $result, new ResultSet()));
+        $result = $this->executeSql($select);
 
-        $ids = [];
-        foreach ($result as $node) {
-            $ids[] = $node[$this->descendantColumn];
-        }
+        $inList = $this->getInList($result, $this->descendantColumn);
 
         try {
             $this->getConnection()->beginTransaction();
@@ -234,18 +400,16 @@ class ClosureTable extends AbstractTreeTable
                 $where->or;
                 $where->equalTo($this->ancestorColumn, $idOrIds);
             });
-            $this->featureSet->apply('preDelete', array($delete));
-            $statement = $this->sql->prepareStatementForSqlObject($delete);
-            $result = $statement->execute();
-            $this->featureSet->apply('postDelete', array($statement, $result));
+
+            $result = $this->executeSql($delete);
 
             if ($result->getAffectedRows() < 1) {
                 throw new RuntimeException($this->pathsTable . '节点数据 删除失败');
             }
 
-            if (!empty($ids)) {
-                $this->update([$this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '-1')], function (Where $where) use ($ids) {
-                    $where->in($this->idKey, $ids);
+            if (!empty($inList)) {
+                $this->update([$this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '-1')], function (Where $where) use ($inList) {
+                    $where->in($this->idKey, $inList);
                 });
             }
 

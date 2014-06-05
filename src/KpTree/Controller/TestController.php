@@ -22,7 +22,7 @@ class TestController extends AbstractActionController
         $table = $this->getServiceLocator()->get('KpTree\Model\ClosureTable');
 
         //$table->addNode(['name' => 'extjs'], 26);
-        var_dump($table->deleteNodeById(2));
+        var_dump($table->moveNode(3,7));
         //$table->deleteChildNodeById(3);
         $vm = new ViewModel();
         $vm->setTerminal(true);
