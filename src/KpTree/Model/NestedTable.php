@@ -335,11 +335,13 @@ class NestedTable extends AbstractTreeTable
         try {
             $this->getConnection()->beginTransaction();
 
-            if ($this->delete([$this->idKey => $idOrIds]) < 1) {
+            $affectedRows = $this->delete([$this->idKey => $idOrIds]);
+
+            if ($affectedRows < 1) {
                 throw new RuntimeException('node 删除失败');
             }
 
-            $affectedRows = $this->update([
+            $this->update([
                 $this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '-' . 1)
             ], function (Where $where) use ($node) {
                 $where->greaterThan($this->lColumn, $node[$this->lColumn]);

@@ -238,13 +238,14 @@ class PathEnumTable extends AbstractTreeTable
         try {
             $this->getConnection()->beginTransaction();
 
-            if ($this->delete([$this->idKey => $idOrIds]) < 1) {
+            $affectedRows = $this->delete([$this->idKey => $idOrIds]);
+            if ( $affectedRows < 1) {
                 throw new RuntimeException('node 删除失败');
             }
 
             $replacePath = substr($node[$this->pathColumn], 0, strrpos($node[$this->pathColumn], $this->pathDelimiter, -2) + 1);
 
-            $affectedRows = $this->update([
+            $this->update([
                 $this->pathColumn => new Expression(
                         'replace(' . $this->quoteIdentifier($this->pathColumn) . ',\'' . $node[$this->pathColumn] . '\',\'' . $replacePath . '\')'
                     ),

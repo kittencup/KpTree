@@ -11,9 +11,10 @@ namespace KpTree\Model;
 
 use KpTree\Exception\RuntimeException;
 use Zend\Db\Adapter\Exception\InvalidQueryException;
+use Zend\Db\ResultSet\ResultSet;
+use Zend\Db\Sql\Delete;
 use Zend\Db\Sql\Expression;
 use Zend\Db\Sql\Insert;
-use Zend\Db\Sql\Predicate\Predicate;
 use Zend\Db\Sql\Select;
 use Zend\Db\Sql\Where;
 
@@ -141,12 +142,123 @@ class ClosureTable extends AbstractTreeTable
 
     public function deleteChildNodeById($idOrIds, $itself = true)
     {
-        // TODO: Implement deleteChildNodeById() method.
+        /**
+         * @todo Mysql 不支持在一个表里先查询在删除的操作，在这里先查询出内容来
+         */
+        $select = new Select($this->pathsTable);
+        $select->columns([$this->descendantColumn])->where([$this->ancestorColumn => $idOrIds]);
+
+        if (!$itself) {
+            $select->where(function (Where $where) use ($idOrIds) {
+                $where->notEqualTo($this->descendantColumn, $idOrIds);
+            });
+        }
+
+        $this->featureSet->apply('preSelect', array($select));
+        $statement = $this->sql->prepareStatementForSqlObject($select);
+        $result = $statement->execute();
+        $this->featureSet->apply('postSelect', array($statement, $result, new ResultSet()));
+
+        $ids = [];
+        foreach ($result as $node) {
+            $ids[] = $node[$this->descendantColumn];
+        }
+
+        try {
+            $this->getConnection()->beginTransaction();
+
+            $affectedRows = $this->delete(function (Delete $delete) use ($ids) {
+                $delete->where(function (Where $where) use ($ids) {
+                    $where->in($this->idKey, $ids);
+                });
+            });
+
+            if ($affectedRows < 1) {
+                throw new RuntimeException('Node 删除失败');
+            }
+
+            $delete = new Delete($this->pathsTable);
+            $delete->where(function (Where $where) use ($ids) {
+                $where->in($this->descendantColumn, $ids);
+            });
+
+            $this->featureSet->apply('preDelete', array($delete));
+            $statement = $this->sql->prepareStatementForSqlObject($delete);
+            $result = $statement->execute();
+            $this->featureSet->apply('postDelete', array($statement, $result));
+            if ($result->getAffectedRows() < 1) {
+                throw new RuntimeException(sprintf($this->pathsTable) . '节点数据 删除失败');
+            }
+            $this->getConnection()->commit();
+        } catch (RuntimeException $e) {
+            $affectedRows = 0;
+            $this->getConnection()->rollback();
+        } catch (InvalidQueryException $e) {
+            $affectedRows = 0;
+            $this->getConnection()->rollback();
+        }
+
+        return $affectedRows;
+
     }
 
     public function deleteNodeById($idOrIds)
     {
-        // TODO: Implement deleteNodeById() method.
+        $select = new Select($this->pathsTable);
+        $select->columns([$this->descendantColumn])->where([$this->ancestorColumn => $idOrIds]);
+        $select->where(function (Where $where) use ($idOrIds) {
+            $where->notEqualTo($this->descendantColumn, $idOrIds);
+        });
+
+        $this->featureSet->apply('preSelect', array($select));
+        $statement = $this->sql->prepareStatementForSqlObject($select);
+        $result = $statement->execute();
+        $this->featureSet->apply('postSelect', array($statement, $result, new ResultSet()));
+
+        $ids = [];
+        foreach ($result as $node) {
+            $ids[] = $node[$this->descendantColumn];
+        }
+
+        try {
+            $this->getConnection()->beginTransaction();
+
+            $affectedRows = $this->delete([$this->idKey => $idOrIds]);
+            if ($affectedRows < 1) {
+                throw new RuntimeException('节点 删除失败');
+            }
+
+            $delete = new Delete($this->pathsTable);
+            $delete->where(function (Where $where) use ($idOrIds) {
+                $where->equalTo($this->descendantColumn, $idOrIds);
+                $where->or;
+                $where->equalTo($this->ancestorColumn, $idOrIds);
+            });
+            $this->featureSet->apply('preDelete', array($delete));
+            $statement = $this->sql->prepareStatementForSqlObject($delete);
+            $result = $statement->execute();
+            $this->featureSet->apply('postDelete', array($statement, $result));
+
+            if ($result->getAffectedRows() < 1) {
+                throw new RuntimeException($this->pathsTable . '节点数据 删除失败');
+            }
+
+            if (!empty($ids)) {
+                $this->update([$this->depthColumn => new Expression($this->quoteIdentifier($this->depthColumn) . '-1')], function (Where $where) use ($ids) {
+                    $where->in($this->idKey, $ids);
+                });
+            }
+
+            $this->getConnection()->commit();
+
+        } catch (RuntimeException $e) {
+            $affectedRows = 0;
+            $this->getConnection()->rollback();
+        } catch (InvalidQueryException $e) {
+            $affectedRows = 0;
+            $this->getConnection()->rollback();
+        }
+        return $affectedRows;
     }
 
 }
