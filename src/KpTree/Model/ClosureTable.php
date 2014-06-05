@@ -19,7 +19,8 @@ use Zend\Db\Sql\Expression;
 use Zend\Db\Sql\Insert;
 use Zend\Db\Sql\Select;
 use Zend\Db\Sql\Where;
-
+use Traversable;
+use Zend\Stdlib\ArrayUtils;
 /**
  * Class ClosureTable
  * @package KpTree\Model
@@ -318,6 +319,17 @@ class ClosureTable extends AbstractTreeTable
      */
     public function deleteChildNodeById($idOrIds, $itself = true)
     {
+        if ($idOrIds instanceof Traversable) {
+            $idOrIds = ArrayUtils::iteratorToArray($idOrIds);
+        }
+
+        if (is_array($idOrIds)) {
+            foreach ($idOrIds as $id) {
+                $this->{__FUNCTION__}($id);
+            }
+            return;
+        }
+
         /**
          * @todo Mysql 不支持在一个表里先查询在删除的操作，在这里先查询出内容来
          */
@@ -376,6 +388,17 @@ class ClosureTable extends AbstractTreeTable
      */
     public function deleteNodeById($idOrIds)
     {
+        if ($idOrIds instanceof Traversable) {
+            $idOrIds = ArrayUtils::iteratorToArray($idOrIds);
+        }
+
+        if (is_array($idOrIds)) {
+            foreach ($idOrIds as $id) {
+                $this->{__FUNCTION__}($id);
+            }
+            return;
+        }
+
         $select = new Select($this->pathsTable);
         $select->columns([$this->descendantColumn])->where([$this->ancestorColumn => $idOrIds]);
         $select->where(function (Where $where) use ($idOrIds) {
