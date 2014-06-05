@@ -20,16 +20,80 @@ use Zend\Db\TableGateway\Feature\FeatureSet;
 use Zend\EventManager\EventInterface;
 use Zend\EventManager\EventManager;
 use Zend\Db\Sql\SqlInterface;
-
+use Traversable;
+use Zend\Stdlib\ArrayUtils;
+use Zend\Db\Adapter\Driver\ResultInterface;
+/**
+ * Class AbstractTreeTable
+ * @package KpTree\Model
+ */
 abstract class AbstractTreeTable extends AbstractTableGateway implements AdapterAwareInterface,
-    TreeTableInterface
+    TreeTableInterface, TreeTableDebugInterface, TreeTableExpandInterface
 {
+    /**
+     * @var bool
+     */
     protected static $openDebug = false;
 
+    /**
+     * 表主键
+     * @var string
+     */
     protected $idKey = 'id';
 
+    /**
+     * 表 深度字段(必须有)
+     * @var string
+     */
     protected $depthColumn = 'depth';
 
+    /**
+     * @param $openDebug
+     */
+    public static function setOpenDebug($openDebug)
+    {
+        self::$openDebug = $openDebug;
+    }
+
+    /**
+     * @return bool
+     */
+    public static function getOpenDebug()
+    {
+        return self::$openDebug;
+    }
+
+
+    /**
+     * @param Adapter $adapter
+     * @return null
+     */
+    public function setDbAdapter(Adapter $adapter)
+    {
+        $this->adapter = $adapter;
+        $this->initialize();
+    }
+
+    /**
+     * Initialize
+     *
+     * @return null
+     */
+    public function initialize()
+    {
+        if (static::$openDebug) {
+            $this->addDebugFeature();
+        }
+
+        parent::initialize();
+    }
+
+    /**
+     * @param mixed $val
+     * @param null $column
+     * @param array $selectColumns
+     * @return array|ArrayObject|null|object|Traversable
+     */
     public function getOneByColumn($val, $column = null, $selectColumns = ['*'])
     {
         if ($column === null) {
@@ -44,27 +108,18 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
 
     }
 
-    public function setDbAdapter(Adapter $adapter)
-    {
-        $this->adapter = $adapter;
-        $this->initialize();
-    }
-
-    public function initialize()
-    {
-        if (static::$openDebug) {
-            $this->addDebugFeature();
-        }
-
-        parent::initialize();
-    }
-
-    protected function getConnection()
+    /**
+     * @return \Zend\Db\Adapter\Driver\ConnectionInterface
+     */
+    public function getConnection()
     {
         return $this->getAdapter()->getDriver()->getConnection();
     }
 
-    protected function addDebugFeature()
+    /**
+     * 添加调试特性
+     */
+    public function addDebugFeature()
     {
 
         if (!$this->featureSet instanceof FeatureSet) {
@@ -80,12 +135,21 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
         $this->featureSet->addFeature(new EventFeature($eventManager));
     }
 
-    protected function quoteIdentifier($identifier)
+    /**
+     * @param string $identifier
+     * @return string
+     */
+    public function quoteIdentifier($identifier)
     {
         return $this->getAdapter()->getPlatform()->quoteIdentifierInFragment($identifier);
     }
 
-    protected function resultSetExtract($row)
+    /**
+     * @param array|ArrayObject|null|object|Traversable $row
+     * @return array|ArrayObject|null|object|Traversable
+     * @throws InvalidArgumentException
+     */
+    public function resultSetExtract($row)
     {
         if (!$row) {
             throw new InvalidArgumentException('$row节点不存在');
@@ -93,6 +157,9 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
 
         if ($row instanceof ArrayObject) {
             $row = $row->getArrayCopy();
+        }
+        if ($row instanceof Traversable) {
+            $row = ArrayUtils::iteratorToArray($row);
         } elseif (is_object($row)) {
             $row = $this->resultSetPrototype->getHydrator()->extract($row);
         }
@@ -106,10 +173,10 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
 
     /**
      * @param $executeSql
-     * @return \Zend\Db\Adapter\Driver\ResultInterface
-     * @throws \KpTree\Exception\InvalidArgumentException
+     * @return ResultInterface
+     * @throws InvalidArgumentException
      */
-    protected function executeSql($executeSql)
+    public function executeSql($executeSql)
     {
         if (!$executeSql instanceof SqlInterface) {
             throw new InvalidArgumentException('$executeSql 必须是 \Zend\Db\Sql\Ddl\SqlInterface 实例');
@@ -127,12 +194,14 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
     }
 
     /**
-     * @param $result
-     * @param $key
+     * @param array|ArrayObject|Traversable $result
+     * @param string $key
      * @return array
      */
-    protected function getInList($result, $key)
+    public function getInList($result, $key)
     {
+        $result = $this->resultSetExtract($result);
+
         $inList = [];
         foreach ($result as $node) {
             $inList[] = $node[$key];

@@ -19,6 +19,7 @@ use Zend\Db\Sql\Select;
 use Zend\Db\Sql\Where;
 use Traversable;
 use Zend\Stdlib\ArrayUtils;
+
 /**
  * Class ClosureTable
  * @package KpTree\Model
@@ -79,7 +80,7 @@ class ClosureTable extends AbstractTreeTable
             $unionSelect->columns([$lastInsertValueExpression, $lastInsertValueExpression]);
             $select->columns([$this->ancestorColumn, $lastInsertValueExpression])->where([$this->descendantColumn => $toId]);
             $select->combine($unionSelect);
-
+            $insert->columns([$this->ancestorColumn, $this->descendantColumn]);
             $insert->values($select);
             $result = $this->executeSql($insert);
             if ($result->getAffectedRows() < 1) {
