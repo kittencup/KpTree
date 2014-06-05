@@ -19,9 +19,10 @@ class TestController extends AbstractActionController
     public function indexAction()
     {
 
-        $table = $this->getServiceLocator()->get('KpTree\Model\NestedTable');
+        $table = $this->getServiceLocator()->get('KpTree\Model\ClosureTable');
 
-        //var_dump($table->getParentNodeById(6)->toArray());
+        $table->addNode(['name' => 'extjs'], 26);
+        var_dump($table->getChildNodeById(1));
         //$table->deleteChildNodeById(2);
         $vm = new ViewModel();
         $vm->setTerminal(true);

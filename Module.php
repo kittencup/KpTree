@@ -57,7 +57,8 @@ class Module implements AutoloaderProviderInterface,
         return [
             'invokables'=>[
                 'KpTree\Model\NestedTable'=>'KpTree\Model\NestedTable',
-                'KpTree\Model\PathEnumTable'=>'KpTree\Model\PathEnumTable'
+                'KpTree\Model\PathEnumTable'=>'KpTree\Model\PathEnumTable',
+                'KpTree\Model\ClosureTable'=>'KpTree\Model\ClosureTable'
             ]
         ];
     }
