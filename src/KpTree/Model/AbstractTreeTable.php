@@ -9,6 +9,8 @@
 
 namespace KpTree\Model;
 
+use ArrayObject;
+use KpTree\Exception\InvalidArgumentException;
 use Zend\Db\Adapter\Adapter;
 use Zend\Db\Adapter\AdapterAwareInterface;
 use Zend\Db\Sql\Select;
@@ -17,13 +19,12 @@ use Zend\Db\TableGateway\Feature\EventFeature;
 use Zend\Db\TableGateway\Feature\FeatureSet;
 use Zend\EventManager\EventInterface;
 use Zend\EventManager\EventManager;
-use KpTree\Exception\InvalidArgumentException;
-use ArrayObject;
+use Zend\Db\Sql\SqlInterface;
 
 abstract class AbstractTreeTable extends AbstractTableGateway implements AdapterAwareInterface,
     TreeTableInterface
 {
-    protected static $openDebug = true;
+    protected static $openDebug = false;
 
     protected $idKey = 'id';
 
@@ -101,6 +102,42 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
         }
 
         return $row;
+    }
+
+    /**
+     * @param $executeSql
+     * @return \Zend\Db\Adapter\Driver\ResultInterface
+     * @throws \KpTree\Exception\InvalidArgumentException
+     */
+    protected function executeSql($executeSql)
+    {
+        if (!$executeSql instanceof SqlInterface) {
+            throw new InvalidArgumentException('$executeSql 必须是 \Zend\Db\Sql\Ddl\SqlInterface 实例');
+        }
+
+        $class = get_class($executeSql);
+
+        $executeAction = substr($class, strrpos($class, '\\') + 1);
+
+        $this->featureSet->apply('pre' . $executeAction, array($executeSql));
+        $statement = $this->sql->prepareStatementForSqlObject($executeSql);
+        $result = $statement->execute();
+        $this->featureSet->apply('post' . $executeAction, array($statement, $result, new ResultSet()));
+        return $result;
+    }
+
+    /**
+     * @param $result
+     * @param $key
+     * @return array
+     */
+    protected function getInList($result, $key)
+    {
+        $inList = [];
+        foreach ($result as $node) {
+            $inList[] = $node[$key];
+        }
+        return $inList;
     }
 
 }

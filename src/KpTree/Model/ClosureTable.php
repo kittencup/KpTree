@@ -9,11 +9,9 @@
 
 namespace KpTree\Model;
 
-use KpTree\Exception\InvalidArgumentException;
 use KpTree\Exception\RuntimeException;
 use Zend\Db\Adapter\Exception\InvalidQueryException;
 use Zend\Db\ResultSet\ResultSet;
-use Zend\Db\Sql\SqlInterface;
 use Zend\Db\Sql\Delete;
 use Zend\Db\Sql\Expression;
 use Zend\Db\Sql\Insert;
@@ -99,41 +97,6 @@ class ClosureTable extends AbstractTreeTable
         return $nodeLastInserValue;
     }
 
-    /**
-     * @param $executeSql
-     * @return \Zend\Db\Adapter\Driver\ResultInterface
-     * @throws \KpTree\Exception\InvalidArgumentException
-     */
-    protected function executeSql($executeSql)
-    {
-        if (!$executeSql instanceof SqlInterface) {
-            throw new InvalidArgumentException('$executeSql 必须是 \Zend\Db\Sql\Ddl\SqlInterface 实例');
-        }
-
-        $class = get_class($executeSql);
-
-        $executeAction = substr($class, strrpos($class, '\\') + 1);
-
-        $this->featureSet->apply('pre' . $executeAction, array($executeSql));
-        $statement = $this->sql->prepareStatementForSqlObject($executeSql);
-        $result = $statement->execute();
-        $this->featureSet->apply('post' . $executeAction, array($statement, $result, new ResultSet()));
-        return $result;
-    }
-
-    /**
-     * @param $result
-     * @param $key
-     * @return array
-     */
-    protected function getInList($result, $key)
-    {
-        $inList = [];
-        foreach ($result as $node) {
-            $inList[] = $node[$key];
-        }
-        return $inList;
-    }
 
     /**
      * @param int $fromId
