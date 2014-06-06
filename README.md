@@ -5,7 +5,7 @@ Zend Framework 2 Mysql Tree TableGateway
 介绍
 ------
 
-实现MYSQL树形方式的几个TableGateway
+实现MYSQL树形的几个TableGateway
 
 设置
 ------
