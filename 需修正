@@ -6,3 +6,7 @@ pathEnum
 1. getChildNodeById
    remove line 173-175, having 改成 where
    line 169 like 可以去掉 $this->Table
+
+2. getParentNodeById
+   having 改成 where
+   
