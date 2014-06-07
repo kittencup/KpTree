@@ -1,0 +1,8 @@
+1.全部 
+  事物处理的KpTree\Exception\RuntimeException 修改为 Zend\Db\Exception\RuntimeException
+
+pathEnum
+
+1. getChildNodeById
+   remove line 173-175, having 改成 where
+   line 169 like 可以去掉 $this->Table
