@@ -9,7 +9,7 @@
 
 namespace KpTree\Model;
 
-use KpTree\Exception\RuntimeException;
+use Zend\Db\Exception\RuntimeException;
 use Zend\Db\Adapter\Exception\InvalidQueryException;
 use Zend\Db\ResultSet\ResultSet;
 use Zend\Db\Sql\Delete;

@@ -8,12 +8,11 @@
  */
 namespace KpTree\Model;
 
-use KpTree\Exception\RuntimeException;
+use Zend\Db\Exception\RuntimeException;
 use Zend\Db\Adapter\Exception\InvalidQueryException;
 use Zend\Db\Sql\Delete;
 use Zend\Db\Sql\Expression;
 use Zend\Db\Sql\Predicate\Like;
-use Zend\Db\Sql\Predicate\Predicate;
 use Zend\Db\Sql\Select;
 use Zend\Db\Sql\Where;
 use Traversable;
@@ -138,14 +137,7 @@ class PathEnumTable extends AbstractTreeTable
             $select->order([$this->pathColumn => $order]);
 
             if ($depth !== null) {
-
-                if (!in_array($this->depthColumn, $columns)) {
-                    $columns[] = $this->depthColumn;
-                }
-
-                $predicate = new Predicate();
-                $predicate->greaterThanOrEqualTo($this->depthColumn, $node[$this->depthColumn] - $depth);
-                $select->having($predicate);
+                $select->where($this->depthColumn, $node[$this->depthColumn] - $depth);
             }
 
             $select->columns($columns);
@@ -166,17 +158,10 @@ class PathEnumTable extends AbstractTreeTable
 
         return $this->select(function (Select $select) use ($node, $depth, $order, $columns) {
 
-            $select->where([new Like($this->table . '.' . $this->pathColumn, $node[$this->pathColumn] . '%')]);
+            $select->where([new Like($this->pathColumn, $node[$this->pathColumn] . '%')]);
 
             if ($depth !== null) {
-
-                if (!in_array($this->depthColumn, $columns)) {
-                    $columns[] = $this->depthColumn;
-                }
-
-                $predicate = new Predicate();
-                $predicate->lessThanOrEqualTo($this->depthColumn, $depth + $node[$this->depthColumn]);
-                $select->having($predicate);
+                $select->where($this->depthColumn, $depth + $node[$this->depthColumn]);
             }
 
             $select->columns($columns);
@@ -239,7 +224,7 @@ class PathEnumTable extends AbstractTreeTable
             $this->getConnection()->beginTransaction();
 
             $affectedRows = $this->delete([$this->idKey => $idOrIds]);
-            if ( $affectedRows < 1) {
+            if ($affectedRows < 1) {
                 throw new RuntimeException('node 删除失败');
             }
 
