@@ -28,7 +28,7 @@ class NestedSelect extends AbstractHelper
         $optionHtml = '';
 
         foreach ($data as $row) {
-            $optionHtml .= sprintf($this->optionWrapper, '', '(' . $row['id'] . ')' . str_repeat('　', $row['depth']) . $row['name']);
+            $optionHtml .= sprintf($this->optionWrapper, '', str_repeat('　', $row['depth']) . $row['name'] .'-'.$row['path']);
         }
 
         return sprintf($this->selectWrapper, '', $optionHtml);

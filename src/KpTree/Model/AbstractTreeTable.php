@@ -33,7 +33,7 @@ abstract class AbstractTreeTable extends AbstractTableGateway implements Adapter
     /**
      * @var bool
      */
-    protected static $openDebug = false;
+    protected static $openDebug = true;
 
     /**
      * 表主键
