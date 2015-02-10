@@ -1,0 +1,21 @@
+{
+  "name": "kittencup/kp-tree",
+  "description": "KpTree是一个基于Zend Framweork 2的模块，实现MYSQL树的几个TableGateway",
+  "license": "BSD-3-Clause",
+  "keywords": [
+    "zf2",
+    "mysql",
+    "tree",
+    "kittencup",
+    "zend framework 2"
+  ],
+  "homepage": "http://www.kittencup.com",
+  "require": {
+    "php": ">=5.3.23"
+  },
+  "autoload": {
+    "psr-0": {
+      "KpTree": "src/"
+    }
+  }
+}

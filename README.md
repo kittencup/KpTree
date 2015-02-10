@@ -1,14 +1,23 @@
-
-Zend Framework 2 Mysql Tree TableGateway
-======
-
-介绍
-------
-
+1.概述
+--------
 实现MYSQL树形的几个TableGateway
 
-设置
-------
+2.安装
+--------
+[github下载](https://github.com/kittencup/KpTree.git) 或者 `composer require "kittencup/kp-tree": "dev-master"`
+
+```
+#application.config.php
+return [
+	'modules' => [
+        // ...
+        'KpTree',
+    ],
+];
+```
+
+3.设置
+--------
 
 1.嵌套集(NestedTable)
 
@@ -63,8 +72,8 @@ Zend Framework 2 Mysql Tree TableGateway
         protected $depthColumn = 'depth';
     }
     
-使用
-------
+4.使用
+--------
 
 具体可参考  KpTree\Model\TreeTableInterface
 
@@ -99,5 +108,4 @@ Zend Framework 2 Mysql Tree TableGateway
 根据节点id 删除节点
 
     $table->deleteNodeById(1);
-
 
