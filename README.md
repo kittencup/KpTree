@@ -1,6 +1,6 @@
 1.概述
 --------
-实现MYSQL树形的几个TableGateway
+KpTree是一个基于Zend Framweork 2模块,实现MYSQL树形的几个TableGateway
 
 2.安装
 --------
